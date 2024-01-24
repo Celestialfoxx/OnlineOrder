@@ -12,9 +12,9 @@ public interface CustomerRepository extends ListCrudRepository<CustomerEntity, L
 
     List<CustomerEntity> findByFirstName(String firstName);
 
+
     List<CustomerEntity> findByLastName(String lastName);
 
-    List<CustomerEntity> findByFirstNameStartingWith(String startWith);
 
     CustomerEntity findByEmail(String email);
 
@@ -22,5 +22,11 @@ public interface CustomerRepository extends ListCrudRepository<CustomerEntity, L
     @Modifying
     @Query("UPDATE customers SET first_name = :firstName, last_name = :lastName WHERE id = :id")
     void updateNameById(long id, String firstName, String lastName);
+
+
+    @Modifying
+    @Query("UPDATE customers SET first_name = :firstName, last_name = :lastName WHERE email = :email")
+    void updateNameByEmail(String email, String firstName, String lastName);
+
 }
 

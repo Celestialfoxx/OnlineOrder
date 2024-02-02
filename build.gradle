@@ -21,6 +21,8 @@ dependencies {
 	implementation 'com.github.javafaker:javafaker:1.0.2'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'com.github.ben-manes.caffeine:caffeine:3.+'
+	implementation 'org.springframework.boot:spring-boot-starter-cache'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 

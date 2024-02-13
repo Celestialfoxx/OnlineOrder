@@ -28,6 +28,8 @@ public class CartController {
 
     @GetMapping("/cart")
     public CartDto getCart(@AuthenticationPrincipal User user) {
+        //Authentication的annotation在这里会自动告诉function发送请求的user是谁
+        //spring boot会根据这个user去找对应的信息
         CustomerEntity customer = customerService.getCustomerByEmail(user.getUsername());
         return cartService.getCart(customer.id());
     }

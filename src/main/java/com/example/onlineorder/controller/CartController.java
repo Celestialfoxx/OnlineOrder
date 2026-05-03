@@ -3,6 +3,8 @@ package com.example.onlineorder.controller;
 import com.example.onlineorder.entity.CustomerEntity;
 import com.example.onlineorder.model.AddToCartBody;
 import com.example.onlineorder.model.CartDto;
+import com.example.onlineorder.model.CheckoutResponse;
+import com.example.onlineorder.service.OrderService;
 import com.example.onlineorder.service.CartService;
 import com.example.onlineorder.service.CustomerService;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -12,17 +14,20 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+
 @RestController
 public class CartController {
 
 
     private final CartService cartService;
     private final CustomerService customerService;
+    private final OrderService orderService;
 
 
-    public CartController(CartService cartService, CustomerService customerService) {
+    public CartController(CartService cartService, CustomerService customerService, OrderService orderService) {
         this.cartService = cartService;
         this.customerService = customerService;
+        this.orderService = orderService;
     }
 
 
@@ -43,9 +48,8 @@ public class CartController {
 
 
     @PostMapping("/cart/checkout")
-    public void checkout(@AuthenticationPrincipal User user) {
+    public CheckoutResponse checkout(@AuthenticationPrincipal User user) {
         CustomerEntity customer = customerService.getCustomerByEmail(user.getUsername());
-        cartService.clearCart(customer.id());
+        return orderService.checkout(customer.id());
     }
 }
-

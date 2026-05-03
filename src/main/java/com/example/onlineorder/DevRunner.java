@@ -5,8 +5,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+@Profile("dev")
 @Component
 public class DevRunner implements ApplicationRunner {
 
@@ -153,5 +155,4 @@ public class DevRunner implements ApplicationRunner {
 //        logger.info(cartService.getCart(1L).toString());
 //    }
 //}
-
 

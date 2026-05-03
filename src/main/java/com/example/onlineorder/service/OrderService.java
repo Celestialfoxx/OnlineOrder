@@ -15,6 +15,8 @@ import com.example.onlineorder.repository.OrderLineItemRepository;
 import com.example.onlineorder.repository.OrderRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.example.onlineorder.entity.IdempotencyRecordEntity;
+import com.example.onlineorder.repository.IdempotencyRecordRepository;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -28,22 +30,34 @@ public class OrderService {
     private final MenuItemRepository menuItemRepository;
     private final OrderRepository orderRepository;
     private final OrderLineItemRepository orderLineItemRepository;
+    private final IdempotencyRecordRepository idempotencyRecordRepository;
+
 
     public OrderService(
             CartRepository cartRepository,
             OrderItemRepository orderItemRepository,
             MenuItemRepository menuItemRepository,
             OrderRepository orderRepository,
-            OrderLineItemRepository orderLineItemRepository) {
+            OrderLineItemRepository orderLineItemRepository,
+            IdempotencyRecordRepository idempotencyRecordRepository) {
         this.cartRepository = cartRepository;
         this.orderItemRepository = orderItemRepository;
         this.menuItemRepository = menuItemRepository;
         this.orderRepository = orderRepository;
         this.orderLineItemRepository = orderLineItemRepository;
+        this.idempotencyRecordRepository = idempotencyRecordRepository;
     }
 
     @Transactional
-    public CheckoutResponse checkout(Long customerId) {
+    public CheckoutResponse checkout(Long customerId, String idempotencyKey) {
+        String operationType = "CHECKOUT";
+        IdempotencyRecordEntity existingRecord = idempotencyRecordRepository.findByCustomerIdAndIdempotencyKeyAndOperationType(
+                customerId, idempotencyKey, operationType
+        );
+        if (existingRecord != null && existingRecord.createdOrderId() != null) {
+            return getCheckoutResponse(existingRecord.createdOrderId());
+        }
+
         CartEntity cart = cartRepository.getByCustomerId(customerId);
         List<OrderItemEntity> cartItems = orderItemRepository.getAllByCartId(cart.id());
 
@@ -52,6 +66,23 @@ public class OrderService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+
+        // 先保存一条未完成的幂等记录来“占住”这个 key，避免并发重复请求同时创建多张订单。
+        // 订单创建完成后，再把 createdOrderId 更新回同一条记录，方便后续重复请求返回同一张订单。
+        IdempotencyRecordEntity idempotencyRecord = new IdempotencyRecordEntity(
+            null,
+            idempotencyKey,
+            customerId,
+            "/cart/checkout",
+            operationType,
+            null,
+            null,
+            now,
+            now.plusHours(24)
+        );
+        IdempotencyRecordEntity savedIdempotencyRecord = idempotencyRecordRepository.save(idempotencyRecord);
+
+        // Create Order
         OrderEntity order = new OrderEntity(
                 null,
                 customerId,
@@ -85,6 +116,29 @@ public class OrderService {
         orderItemRepository.deleteByCartId(cart.id());
         cartRepository.updateTotalPrice(cart.id(), 0.0);
 
+        // 订单创建出来后，再完整更新幂等记录，确保无论后续请求是命中未完成记录还是完整记录，都能正确返回订单信息。
+        IdempotencyRecordEntity completedRecord = new IdempotencyRecordEntity(
+                savedIdempotencyRecord.id(),
+                savedIdempotencyRecord.idempotencyKey(),
+                savedIdempotencyRecord.customerId(),
+                savedIdempotencyRecord.requestPath(),
+                savedIdempotencyRecord.operationType(),
+                savedOrder.id(),
+                201,
+                savedIdempotencyRecord.createdAt(),
+                savedIdempotencyRecord.expiredAt()
+        );
+        idempotencyRecordRepository.save(completedRecord);
+
         return new CheckoutResponse(savedOrder, orderLineItemDtos);
+    }
+
+    private CheckoutResponse getCheckoutResponse(Long orderId) {
+        OrderEntity order = orderRepository.findById(orderId).get();
+        List<OrderLineItemDto> orderLineItems = orderLineItemRepository.findByOrderId(orderId)
+                .stream()
+                .map(OrderLineItemDto::new)
+                .toList();
+        return new CheckoutResponse(order, orderLineItems);
     }
 }

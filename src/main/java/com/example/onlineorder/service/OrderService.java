@@ -6,6 +6,8 @@ import com.example.onlineorder.entity.OrderEntity;
 import com.example.onlineorder.entity.OrderItemEntity;
 import com.example.onlineorder.entity.OrderLineItemEntity;
 import com.example.onlineorder.entity.OrderStatus;
+import com.example.onlineorder.exception.CheckoutInProgressException;
+import com.example.onlineorder.exception.EmptyCartException;
 import com.example.onlineorder.model.CheckoutResponse;
 import com.example.onlineorder.model.OrderLineItemDto;
 import com.example.onlineorder.repository.CartRepository;
@@ -54,15 +56,22 @@ public class OrderService {
         IdempotencyRecordEntity existingRecord = idempotencyRecordRepository.findByCustomerIdAndIdempotencyKeyAndOperationType(
                 customerId, idempotencyKey, operationType
         );
+
+        // 如果已经有一条记录，并且记录里有 createdOrderId，说明之前的请求已经成功创建了订单，直接返回订单信息。
         if (existingRecord != null && existingRecord.createdOrderId() != null) {
             return getCheckoutResponse(existingRecord.createdOrderId());
+        }
+
+        // 如果已经有一条记录，但记录里没有 createdOrderId，说明之前的请求还在处理中，抛出异常提示用户请求正在处理中。
+        if (existingRecord != null) {
+            throw new CheckoutInProgressException("Checkout is already in progress");
         }
 
         CartEntity cart = cartRepository.getByCustomerId(customerId);
         List<OrderItemEntity> cartItems = orderItemRepository.getAllByCartId(cart.id());
 
         if (cartItems.isEmpty()) {
-            throw new IllegalStateException("Cannot checkout an empty cart");
+            throw new EmptyCartException("Cannot checkout an empty cart");
         }
 
         LocalDateTime now = LocalDateTime.now();

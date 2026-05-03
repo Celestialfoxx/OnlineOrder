@@ -8,13 +8,18 @@ spring:
     username: ${DATABASE_USERNAME:postgres}
     password: ${DATABASE_PASSWORD:secret}
     driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   sql:
     init:
       mode: ${INIT_DB:always}
       schema-locations: "classpath:database-init.sql"
   cache:
-    caffeine:
-      spec: expireAfterWrite=60s
+    type: redis
+    redis:
+      time-to-live: 60s
 
 logging:
   level:

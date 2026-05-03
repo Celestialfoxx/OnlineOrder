@@ -27,7 +27,10 @@ public class RestaurantService {
         this.restaurantRepository = restaurantRepository;
     }
 
-    @Cacheable("restaurants")
+    // 这个方法会查询所有餐厅和菜单项，并将它们组合成 RestaurantDto 对象列表。
+    // 结果会被缓存，缓存键为 "all"，这样后续请求就不需要再次查询数据库，直接从缓存中获取数据。
+    // 如果以后加了餐厅/菜单修改接口，写操作后要清理 restaurantList::all。
+    @Cacheable(cacheNames = "restaurantList", key = "'all'")
     public List<RestaurantDto> getRestaurants() {
         List<RestaurantEntity> restaurantEntities = restaurantRepository.findAll();
         List<MenuItemEntity> menuItemEntities = menuItemRepository.findAll();

@@ -19,6 +19,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import com.example.onlineorder.entity.IdempotencyRecordEntity;
 import com.example.onlineorder.repository.IdempotencyRecordRepository;
+import com.example.onlineorder.event.OrderCreatedEvent;
+import com.example.onlineorder.event.OrderEventProducer;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
+
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -33,6 +38,8 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderLineItemRepository orderLineItemRepository;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
+    private final OrderEventProducer orderEventProducer;
+
 
 
     public OrderService(
@@ -41,13 +48,15 @@ public class OrderService {
             MenuItemRepository menuItemRepository,
             OrderRepository orderRepository,
             OrderLineItemRepository orderLineItemRepository,
-            IdempotencyRecordRepository idempotencyRecordRepository) {
+            IdempotencyRecordRepository idempotencyRecordRepository,
+            OrderEventProducer orderEventProducer) {
         this.cartRepository = cartRepository;
         this.orderItemRepository = orderItemRepository;
         this.menuItemRepository = menuItemRepository;
         this.orderRepository = orderRepository;
         this.orderLineItemRepository = orderLineItemRepository;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
+        this.orderEventProducer = orderEventProducer;
     }
 
     @Transactional
@@ -138,16 +147,45 @@ public class OrderService {
                 savedIdempotencyRecord.expiredAt()
         );
         idempotencyRecordRepository.save(completedRecord);
+        orderEventProducer.publishOrderCreated(
+                OrderCreatedEvent.from(savedOrder.id(), savedOrder.customerId(), savedOrder.totalAmount())
+        );
+
 
         return new CheckoutResponse(savedOrder, orderLineItemDtos);
     }
 
+    public CheckoutResponse getOrderForCustomer(Long orderId, Long customerId) {
+        OrderEntity order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Order not found"));
+
+        if (!order.customerId().equals(customerId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this order");
+        }
+
+        return getCheckoutResponse(order);
+    }
+
     private CheckoutResponse getCheckoutResponse(Long orderId) {
         OrderEntity order = orderRepository.findById(orderId).get();
-        List<OrderLineItemDto> orderLineItems = orderLineItemRepository.findByOrderId(orderId)
+        return getCheckoutResponse(order);
+    }
+
+    private CheckoutResponse getCheckoutResponse(OrderEntity order) {
+        List<OrderLineItemDto> orderLineItems = orderLineItemRepository.findByOrderId(order.id())
                 .stream()
                 .map(OrderLineItemDto::new)
                 .toList();
         return new CheckoutResponse(order, orderLineItems);
+    }
+
+    @Transactional
+    public void markOrderPaid(Long orderId) {
+        orderRepository.updateStatus(orderId, OrderStatus.PAID.name());
+    }
+
+    @Transactional
+    public void markOrderFailed(Long orderId) {
+        orderRepository.updateStatus(orderId, OrderStatus.FAILED.name());
     }
 }

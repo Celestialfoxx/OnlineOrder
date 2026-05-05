@@ -7,6 +7,8 @@ import com.example.onlineorder.entity.OrderEntity;
 import com.example.onlineorder.entity.OrderItemEntity;
 import com.example.onlineorder.entity.OrderLineItemEntity;
 import com.example.onlineorder.entity.OrderStatus;
+import com.example.onlineorder.event.OrderCreatedEvent;
+import com.example.onlineorder.event.OrderEventProducer;
 import com.example.onlineorder.model.CheckoutResponse;
 import com.example.onlineorder.repository.CartRepository;
 import com.example.onlineorder.repository.IdempotencyRecordRepository;
@@ -48,6 +50,9 @@ public class OrderServiceTests {
     @Mock
     private IdempotencyRecordRepository idempotencyRecordRepository;
 
+    @Mock
+    private OrderEventProducer orderEventProducer;
+
     private OrderService orderService;
 
     @BeforeEach
@@ -58,7 +63,8 @@ public class OrderServiceTests {
                 menuItemRepository,
                 orderRepository,
                 orderLineItemRepository,
-                idempotencyRecordRepository
+                idempotencyRecordRepository,
+                orderEventProducer
         );
     }
 
@@ -105,6 +111,7 @@ public class OrderServiceTests {
         Mockito.verify(orderItemRepository).deleteByCartId(cartId);
         Mockito.verify(cartRepository).updateTotalPrice(cartId, 0.0);
         Mockito.verify(idempotencyRecordRepository, Mockito.times(2)).save(Mockito.any(IdempotencyRecordEntity.class));
+        Mockito.verify(orderEventProducer).publishOrderCreated(Mockito.any(OrderCreatedEvent.class));
     }
 
     @Test
@@ -142,5 +149,6 @@ public class OrderServiceTests {
         Mockito.verify(orderRepository, Mockito.never()).save(Mockito.any(OrderEntity.class));
         Mockito.verify(orderItemRepository, Mockito.never()).deleteByCartId(Mockito.anyLong());
         Mockito.verify(cartRepository, Mockito.never()).updateTotalPrice(Mockito.anyLong(), Mockito.anyDouble());
+        Mockito.verify(orderEventProducer, Mockito.never()).publishOrderCreated(Mockito.any(OrderCreatedEvent.class));
     }
 }

@@ -12,6 +12,7 @@ public class OrderEventProducer {
 
     public static final String ORDER_CREATED_TOPIC = "order.created";
     public static final String PAYMENT_SUCCEEDED_TOPIC = "payment.succeeded";
+    public static final String PAYMENT_FAILED_TOPIC = "payment.failed";
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
@@ -27,5 +28,10 @@ public class OrderEventProducer {
     public void publishPaymentSucceeded(PaymentSucceededEvent event) {
         kafkaTemplate.send(PAYMENT_SUCCEEDED_TOPIC, event.orderId().toString(), event);
         logger.info("Published PaymentSucceededEvent for orderId={}", event.orderId());
+    }
+
+    public void publishPaymentFailed(PaymentFailedEvent event) {
+        kafkaTemplate.send(PAYMENT_FAILED_TOPIC, event.orderId().toString(), event);
+        logger.info("Published PaymentFailedEvent for orderId={}, reason={}", event.orderId(), event.reason());
     }
 }

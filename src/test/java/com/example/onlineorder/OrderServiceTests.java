@@ -9,6 +9,7 @@ import com.example.onlineorder.entity.OrderLineItemEntity;
 import com.example.onlineorder.entity.OrderStatus;
 import com.example.onlineorder.event.OrderCreatedEvent;
 import com.example.onlineorder.event.OrderEventProducer;
+import com.example.onlineorder.exception.InventoryNotAvailableException;
 import com.example.onlineorder.model.CheckoutResponse;
 import com.example.onlineorder.repository.CartRepository;
 import com.example.onlineorder.repository.IdempotencyRecordRepository;
@@ -16,6 +17,7 @@ import com.example.onlineorder.repository.MenuItemRepository;
 import com.example.onlineorder.repository.OrderItemRepository;
 import com.example.onlineorder.repository.OrderLineItemRepository;
 import com.example.onlineorder.repository.OrderRepository;
+import com.example.onlineorder.service.InventoryService;
 import com.example.onlineorder.service.OrderService;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,14 +59,15 @@ public class OrderServiceTests {
 
     @BeforeEach
     void setup() {
+        InventoryService inventoryService = new InventoryService(menuItemRepository);
         orderService = new OrderService(
                 cartRepository,
                 orderItemRepository,
-                menuItemRepository,
                 orderRepository,
                 orderLineItemRepository,
                 idempotencyRecordRepository,
-                orderEventProducer
+                orderEventProducer,
+                inventoryService
         );
     }
 
@@ -76,7 +79,7 @@ public class OrderServiceTests {
 
         CartEntity cart = new CartEntity(cartId, customerId, 20.0);
         OrderItemEntity cartItem = new OrderItemEntity(3L, 4L, cartId, 10.0, 2);
-        MenuItemEntity menuItem = new MenuItemEntity(4L, 5L, "Burger", "", 10.0, "");
+        MenuItemEntity menuItem = new MenuItemEntity(4L, 5L, "Burger", "", 10.0, "", 100, 0);
         OrderEntity savedOrder = new OrderEntity(6L, customerId, OrderStatus.CREATED, 20.0, LocalDateTime.now(), LocalDateTime.now());
         OrderLineItemEntity savedLineItem = new OrderLineItemEntity(7L, 6L, 4L, 5L, "Burger", 10.0, 2, 20.0);
         IdempotencyRecordEntity savedRecord = new IdempotencyRecordEntity(
@@ -101,6 +104,7 @@ public class OrderServiceTests {
         Mockito.when(idempotencyRecordRepository.save(Mockito.any(IdempotencyRecordEntity.class))).thenReturn(savedRecord);
         Mockito.when(orderRepository.save(Mockito.any(OrderEntity.class))).thenReturn(savedOrder);
         Mockito.when(menuItemRepository.findById(4L)).thenReturn(Optional.of(menuItem));
+        Mockito.when(menuItemRepository.deductStockWithVersion(4L, 2, 0)).thenReturn(1);
         Mockito.when(orderLineItemRepository.save(Mockito.any(OrderLineItemEntity.class))).thenReturn(savedLineItem);
 
         CheckoutResponse response = orderService.checkout(customerId, idempotencyKey);
@@ -111,6 +115,7 @@ public class OrderServiceTests {
         Mockito.verify(orderItemRepository).deleteByCartId(cartId);
         Mockito.verify(cartRepository).updateTotalPrice(cartId, 0.0);
         Mockito.verify(idempotencyRecordRepository, Mockito.times(2)).save(Mockito.any(IdempotencyRecordEntity.class));
+        Mockito.verify(menuItemRepository).deductStockWithVersion(4L, 2, 0);
         Mockito.verify(orderEventProducer).publishOrderCreated(Mockito.any(OrderCreatedEvent.class));
     }
 
@@ -150,5 +155,98 @@ public class OrderServiceTests {
         Mockito.verify(orderItemRepository, Mockito.never()).deleteByCartId(Mockito.anyLong());
         Mockito.verify(cartRepository, Mockito.never()).updateTotalPrice(Mockito.anyLong(), Mockito.anyDouble());
         Mockito.verify(orderEventProducer, Mockito.never()).publishOrderCreated(Mockito.any(OrderCreatedEvent.class));
+    }
+
+    @Test
+    void checkout_whenInventoryIsInsufficient_shouldThrowExceptionAndNotClearCart() {
+        long customerId = 1L;
+        long cartId = 2L;
+        String idempotencyKey = "checkout-key";
+
+        CartEntity cart = new CartEntity(cartId, customerId, 20.0);
+        OrderItemEntity cartItem = new OrderItemEntity(3L, 4L, cartId, 10.0, 2);
+        MenuItemEntity menuItem = new MenuItemEntity(4L, 5L, "Burger", "", 10.0, "", 1, 0);
+        OrderEntity savedOrder = new OrderEntity(6L, customerId, OrderStatus.CREATED, 20.0, LocalDateTime.now(), LocalDateTime.now());
+        IdempotencyRecordEntity savedRecord = new IdempotencyRecordEntity(
+                8L,
+                idempotencyKey,
+                customerId,
+                "/cart/checkout",
+                "CHECKOUT",
+                null,
+                null,
+                LocalDateTime.now(),
+                LocalDateTime.now().plusHours(24)
+        );
+
+        Mockito.when(idempotencyRecordRepository.findByCustomerIdAndIdempotencyKeyAndOperationType(
+                customerId,
+                idempotencyKey,
+                "CHECKOUT"
+        )).thenReturn(null);
+        Mockito.when(cartRepository.getByCustomerId(customerId)).thenReturn(cart);
+        Mockito.when(orderItemRepository.getAllByCartId(cartId)).thenReturn(List.of(cartItem));
+        Mockito.when(idempotencyRecordRepository.save(Mockito.any(IdempotencyRecordEntity.class))).thenReturn(savedRecord);
+        Mockito.when(orderRepository.save(Mockito.any(OrderEntity.class))).thenReturn(savedOrder);
+        Mockito.when(menuItemRepository.findById(4L)).thenReturn(Optional.of(menuItem));
+
+        Assertions.assertThrows(
+                InventoryNotAvailableException.class,
+                () -> orderService.checkout(customerId, idempotencyKey)
+        );
+
+        Mockito.verify(menuItemRepository, Mockito.never()).deductStockWithVersion(Mockito.anyLong(), Mockito.anyInt(), Mockito.anyInt());
+        Mockito.verify(orderLineItemRepository, Mockito.never()).save(Mockito.any(OrderLineItemEntity.class));
+        Mockito.verify(orderItemRepository, Mockito.never()).deleteByCartId(Mockito.anyLong());
+        Mockito.verify(cartRepository, Mockito.never()).updateTotalPrice(Mockito.anyLong(), Mockito.anyDouble());
+        Mockito.verify(orderEventProducer, Mockito.never()).publishOrderCreated(Mockito.any(OrderCreatedEvent.class));
+    }
+
+    @Test
+    void checkout_whenVersionConflictButStockAvailable_shouldRetryAndCreateOrder() {
+        long customerId = 1L;
+        long cartId = 2L;
+        String idempotencyKey = "checkout-key";
+
+        CartEntity cart = new CartEntity(cartId, customerId, 20.0);
+        OrderItemEntity cartItem = new OrderItemEntity(3L, 4L, cartId, 10.0, 2);
+        MenuItemEntity staleMenuItem = new MenuItemEntity(4L, 5L, "Burger", "", 10.0, "", 100, 0);
+        MenuItemEntity latestMenuItem = new MenuItemEntity(4L, 5L, "Burger", "", 10.0, "", 98, 1);
+        OrderEntity savedOrder = new OrderEntity(6L, customerId, OrderStatus.CREATED, 20.0, LocalDateTime.now(), LocalDateTime.now());
+        OrderLineItemEntity savedLineItem = new OrderLineItemEntity(7L, 6L, 4L, 5L, "Burger", 10.0, 2, 20.0);
+        IdempotencyRecordEntity savedRecord = new IdempotencyRecordEntity(
+                8L,
+                idempotencyKey,
+                customerId,
+                "/cart/checkout",
+                "CHECKOUT",
+                null,
+                null,
+                LocalDateTime.now(),
+                LocalDateTime.now().plusHours(24)
+        );
+
+        Mockito.when(idempotencyRecordRepository.findByCustomerIdAndIdempotencyKeyAndOperationType(
+                customerId,
+                idempotencyKey,
+                "CHECKOUT"
+        )).thenReturn(null);
+        Mockito.when(cartRepository.getByCustomerId(customerId)).thenReturn(cart);
+        Mockito.when(orderItemRepository.getAllByCartId(cartId)).thenReturn(List.of(cartItem));
+        Mockito.when(idempotencyRecordRepository.save(Mockito.any(IdempotencyRecordEntity.class))).thenReturn(savedRecord);
+        Mockito.when(orderRepository.save(Mockito.any(OrderEntity.class))).thenReturn(savedOrder);
+        Mockito.when(menuItemRepository.findById(4L)).thenReturn(Optional.of(staleMenuItem), Optional.of(latestMenuItem));
+        Mockito.when(menuItemRepository.deductStockWithVersion(4L, 2, 0)).thenReturn(0);
+        Mockito.when(menuItemRepository.deductStockWithVersion(4L, 2, 1)).thenReturn(1);
+        Mockito.when(orderLineItemRepository.save(Mockito.any(OrderLineItemEntity.class))).thenReturn(savedLineItem);
+
+        CheckoutResponse response = orderService.checkout(customerId, idempotencyKey);
+
+        Assertions.assertEquals(savedOrder.id(), response.orderId());
+        Mockito.verify(menuItemRepository).deductStockWithVersion(4L, 2, 0);
+        Mockito.verify(menuItemRepository).deductStockWithVersion(4L, 2, 1);
+        Mockito.verify(orderItemRepository).deleteByCartId(cartId);
+        Mockito.verify(cartRepository).updateTotalPrice(cartId, 0.0);
+        Mockito.verify(orderEventProducer).publishOrderCreated(Mockito.any(OrderCreatedEvent.class));
     }
 }

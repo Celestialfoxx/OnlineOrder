@@ -11,7 +11,6 @@ import com.example.onlineorder.exception.EmptyCartException;
 import com.example.onlineorder.model.CheckoutResponse;
 import com.example.onlineorder.model.OrderLineItemDto;
 import com.example.onlineorder.repository.CartRepository;
-import com.example.onlineorder.repository.MenuItemRepository;
 import com.example.onlineorder.repository.OrderItemRepository;
 import com.example.onlineorder.repository.OrderLineItemRepository;
 import com.example.onlineorder.repository.OrderRepository;
@@ -34,29 +33,29 @@ public class OrderService {
 
     private final CartRepository cartRepository;
     private final OrderItemRepository orderItemRepository;
-    private final MenuItemRepository menuItemRepository;
     private final OrderRepository orderRepository;
     private final OrderLineItemRepository orderLineItemRepository;
     private final IdempotencyRecordRepository idempotencyRecordRepository;
     private final OrderEventProducer orderEventProducer;
+    private final InventoryService inventoryService;
 
 
 
     public OrderService(
             CartRepository cartRepository,
             OrderItemRepository orderItemRepository,
-            MenuItemRepository menuItemRepository,
             OrderRepository orderRepository,
             OrderLineItemRepository orderLineItemRepository,
             IdempotencyRecordRepository idempotencyRecordRepository,
-            OrderEventProducer orderEventProducer) {
+            OrderEventProducer orderEventProducer,
+            InventoryService inventoryService) {
         this.cartRepository = cartRepository;
         this.orderItemRepository = orderItemRepository;
-        this.menuItemRepository = menuItemRepository;
         this.orderRepository = orderRepository;
         this.orderLineItemRepository = orderLineItemRepository;
         this.idempotencyRecordRepository = idempotencyRecordRepository;
         this.orderEventProducer = orderEventProducer;
+        this.inventoryService = inventoryService;
     }
 
     @Transactional
@@ -111,11 +110,13 @@ public class OrderService {
         );
         OrderEntity savedOrder = orderRepository.save(order);
 
+        // OrderLineItem是形成订单快照，方便查询历史订单时使用的，所以除了关联的 menuItemId 和 restaurantId 以外，还需要把当时 menuItem 的 name 和 price 都记录下来，避免后续 menuItem 的信息变动导致订单信息不一致。
         List<OrderLineItemDto> orderLineItemDtos = new ArrayList<>();
         for (OrderItemEntity cartItem : cartItems) {
-            MenuItemEntity menuItem = menuItemRepository.findById(cartItem.menuItemId()).get();
-            double lineTotal = cartItem.price() * cartItem.quantity();
+            MenuItemEntity menuItem = inventoryService.deductStock(cartItem.menuItemId(), cartItem.quantity());
 
+            // 这里的 lineTotal 是为了记录每一行的总价，
+            double lineTotal = cartItem.price() * cartItem.quantity();
             OrderLineItemEntity orderLineItem = new OrderLineItemEntity(
                     null,
                     savedOrder.id(),

@@ -57,6 +57,8 @@ CREATE TABLE menu_items
     price         NUMERIC            NOT NULL,
     description   TEXT,
     image_url     TEXT,
+    stock         INTEGER NOT NULL DEFAULT 100,
+    version      INTEGER NOT NULL DEFAULT 0,
     CONSTRAINT fk_restaurant FOREIGN KEY (restaurant_id) REFERENCES restaurants (id) ON DELETE CASCADE
 );
 

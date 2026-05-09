@@ -52,7 +52,7 @@ public class CartServiceTests {
         long menuItemId = 2L;
         long cartId = 3L;
         CartEntity cartEntity = new CartEntity(cartId, customerId, 0.0);
-        MenuItemEntity menuItem = new MenuItemEntity(menuItemId, 1L, "Name", "", 10.0, "");
+        MenuItemEntity menuItem = new MenuItemEntity(menuItemId, 1L, "Name", "", 10.0, "", 100, 0);
 
 
         // Mock repository method calls
@@ -80,7 +80,7 @@ public class CartServiceTests {
         long cartId = 3L;
         long orderItemId = 4L;
         CartEntity cartEntity = new CartEntity(cartId, customerId, 10.0);
-        MenuItemEntity menuItem = new MenuItemEntity(menuItemId, 1L, "Name", "", 10.0, "");
+        MenuItemEntity menuItem = new MenuItemEntity(menuItemId, 1L, "Name", "", 10.0, "", 100, 0);
         OrderItemEntity orderItemEntity = new OrderItemEntity(orderItemId, menuItemId, customerId, 10.0, 1);
 
 
@@ -112,8 +112,8 @@ public class CartServiceTests {
                 new OrderItemEntity(2L, 2L, cartId, 10.0, 2)
         );
         List<MenuItemEntity> menuItems = List.of(
-                new MenuItemEntity(1L, 1L, "Name1", "", 1.0, ""),
-                new MenuItemEntity(2L, 1L, "Name2", "", 10.0, "")
+                new MenuItemEntity(1L, 1L, "Name1", "", 1.0, "", 100, 0),
+                new MenuItemEntity(2L, 1L, "Name2", "", 10.0, "", 100, 0)
         );
 
 

@@ -8,13 +8,31 @@ spring:
     username: ${DATABASE_USERNAME:postgres}
     password: ${DATABASE_PASSWORD:secret}
     driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
   sql:
     init:
       mode: ${INIT_DB:always}
       schema-locations: "classpath:database-init.sql"
   cache:
-    caffeine:
-      spec: expireAfterWrite=60s
+    type: redis
+    redis:
+      time-to-live: 60s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: onlineorder-order-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: com.example.onlineorder.event
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
 
 logging:
   level:

@@ -1,9 +1,13 @@
+DROP TABLE IF EXISTS order_line_items;
+DROP TABLE IF EXISTS idempotency_records;
+DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS order_items;
 DROP TABLE IF EXISTS menu_items;
 DROP TABLE IF EXISTS restaurants;
 DROP TABLE IF EXISTS carts;
 DROP TABLE IF EXISTS authorities;
 DROP TABLE IF EXISTS customers;
+
 
 
 CREATE TABLE customers
@@ -53,6 +57,8 @@ CREATE TABLE menu_items
     price         NUMERIC            NOT NULL,
     description   TEXT,
     image_url     TEXT,
+    stock         INTEGER NOT NULL DEFAULT 100,
+    version      INTEGER NOT NULL DEFAULT 0,
     CONSTRAINT fk_restaurant FOREIGN KEY (restaurant_id) REFERENCES restaurants (id) ON DELETE CASCADE
 );
 
@@ -67,6 +73,49 @@ CREATE TABLE order_items
     CONSTRAINT fk_cart FOREIGN KEY (cart_id) REFERENCES carts (id) ON DELETE CASCADE,
     CONSTRAINT fk_menu_item FOREIGN KEY (menu_item_id) REFERENCES menu_items (id) ON DELETE CASCADE
 );
+
+CREATE TABLE orders
+(
+    id           SERIAL PRIMARY KEY NOT NULL,
+    customer_id  INTEGER            NOT NULL,
+    status       TEXT               NOT NULL,
+    total_amount NUMERIC            NOT NULL,
+    created_at   TIMESTAMP          NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   TIMESTAMP          NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
+);
+
+CREATE TABLE order_line_items
+(
+    id                 SERIAL PRIMARY KEY NOT NULL,
+    order_id           INTEGER            NOT NULL,
+    menu_item_id        INTEGER            NOT NULL,
+    restaurant_id       INTEGER            NOT NULL,
+    item_name_snapshot  TEXT               NOT NULL,
+    unit_price          NUMERIC            NOT NULL,
+    quantity            INTEGER            NOT NULL,
+    line_total          NUMERIC            NOT NULL,
+    CONSTRAINT fk_order FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE,
+    CONSTRAINT fk_menu_item FOREIGN KEY (menu_item_id) REFERENCES menu_items (id) ON DELETE CASCADE,
+    CONSTRAINT fk_restaurant FOREIGN KEY (restaurant_id) REFERENCES restaurants (id) ON DELETE CASCADE
+);
+
+CREATE TABLE idempotency_records
+(
+    id                SERIAL PRIMARY KEY NOT NULL,
+    idempotency_key   TEXT               NOT NULL,
+    customer_id       INTEGER            NOT NULL,
+    request_path      TEXT               NOT NULL,
+    operation_type    TEXT               NOT NULL,
+    created_order_id  INTEGER,
+    response_status   INTEGER,
+    created_at        TIMESTAMP          NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expired_at        TIMESTAMP          NOT NULL,
+    CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE,
+    CONSTRAINT fk_created_order FOREIGN KEY (created_order_id) REFERENCES orders (id) ON DELETE SET NULL,
+    CONSTRAINT uk_idempotency_customer_key_operation UNIQUE (customer_id, idempotency_key, operation_type)
+);
+
 
 
 INSERT INTO restaurants (name, address, image_url, phone)

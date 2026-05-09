@@ -1,6 +1,6 @@
 # Online Order: Secure and Scalable Food Ordering Backend
 
-Online Order is a Spring Boot based food ordering platform that has been upgraded from a basic CRUD application into a scalable backend system with production-oriented patterns: idempotent checkout, order lifecycle management, Redis caching, Kafka event processing, and optimistic locking for inventory concurrency.
+Online Order is a Spring Boot based food ordering platform that has been upgraded from a basic CRUD application into a scalable backend system with production-oriented patterns: idempotent checkout, order lifecycle management, Redis caching, Kafka event processing, optimistic locking for inventory concurrency, and Redis-backed rate limiting.
 
 The project supports restaurant and menu browsing, session-based user authentication, cart management, checkout, asynchronous payment simulation, order status tracking, and notification simulation.
 
@@ -12,6 +12,7 @@ The project supports restaurant and menu browsing, session-based user authentica
 - Integrated Redis cache-aside caching for high-read restaurant/menu/cart queries with TTL-based expiration.
 - Introduced Kafka-based asynchronous workflow for order creation, payment simulation, order status updates, and notification simulation.
 - Implemented optimistic locking with `stock` and `version` fields to prevent overselling under concurrent checkout requests.
+- Added Redis-backed rate limiting to protect checkout and menu APIs from traffic spikes and abuse.
 - Containerized local infrastructure with Docker Compose for PostgreSQL, Redis, and Kafka.
 - Secured user/cart/order workflows with Spring Security session-based authentication.
 
@@ -44,6 +45,7 @@ Service Layer
   - InventoryService
   - PaymentService
   - NotificationService
+  - RateLimitService
         |
         +--------------------+
         |                    |
@@ -77,6 +79,7 @@ The codebase keeps a clear controller-service-repository structure while using e
 - Simulated email/push notification consumer.
 - Redis caching for read-heavy restaurant/menu/cart access.
 - Inventory stock deduction with optimistic locking and limited retry.
+- Redis-backed rate limiting for checkout and menu endpoints.
 
 ## Order Lifecycle
 
@@ -228,6 +231,42 @@ If the update affects `0` rows:
 
 The service reloads the latest `stock/version` and performs a limited retry. If stock is insufficient or retries are exhausted, checkout returns `409 CONFLICT`.
 
+## Redis Rate Limiting
+
+The application includes a request filter that performs rate limiting before requests reach controllers.
+
+Protected endpoints:
+
+| API | Scope | Limit |
+| --- | --- | --- |
+| `POST /cart/checkout` | authenticated user, fallback to IP | 5 requests/minute |
+| `GET /restaurants/menu` | IP address | 60 requests/minute |
+| `GET /restaurant/{restaurantId}/menu` | IP address | 60 requests/minute |
+
+The limiter stores counters in Redis using fixed one-minute windows:
+
+```text
+rate_limit:checkout:user:test@example.com:202605081730
+rate_limit:menu:ip:127.0.0.1:202605081730
+```
+
+Each request increments the Redis counter atomically with `INCR`. When a key is created for the first request in a window, the service sets a one-minute TTL to prevent stale rate limit keys from accumulating.
+
+If a client exceeds the configured limit, the filter stops the request before it reaches the controller and returns:
+
+```http
+HTTP/1.1 429 Too Many Requests
+```
+
+```json
+{
+  "status": 429,
+  "error": "Too Many Requests",
+  "message": "Rate limit exceeded. Please try again later.",
+  "timestamp": "..."
+}
+```
+
 ## Local Setup
 
 ### Prerequisites
@@ -317,6 +356,24 @@ stock decreases
 version increases
 ```
 
+### Verify Rate Limiting
+
+Run this command while the backend is running:
+
+```bash
+for i in {1..61}; do
+  echo "Request $i"
+  curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/restaurants/menu
+done
+```
+
+Expected result:
+
+```text
+Requests within the limit return 200
+Requests after the per-minute limit return 429
+```
+
 ## Testing
 
 The project includes focused unit tests for:
@@ -326,6 +383,7 @@ The project includes focused unit tests for:
 - inventory optimistic locking success path
 - insufficient stock failure path
 - version conflict retry path
+- Redis rate limit allow/reject behavior
 
 Run:
 
@@ -342,6 +400,7 @@ This project demonstrates backend concepts commonly discussed in system design a
 - transaction-safe order creation
 - order lifecycle state modeling
 - Redis cache-aside strategy for high-read traffic
+- Redis-backed rate limiting for traffic governance
 - Kafka-based event-driven architecture
 - consumer group separation by backend responsibility
 - optimistic locking to prevent overselling
